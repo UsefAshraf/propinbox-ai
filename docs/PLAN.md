@@ -4,7 +4,7 @@
 
 | # | Phase | Scope | Status |
 |---|-------|-------|--------|
-| 1 | Foundation + Live inbox | Schema, seed data, inbox UI (list + thread), HTTP webhook, "simulate incoming message" | in progress |
+| 1 | Foundation + Live inbox | Schema, seed data, inbox UI (list + thread), HTTP webhook, "simulate incoming message" | done |
 | 2 | AI agent + draft flow | Scheduled action calling Claude with tools (`lookup_tenant`, `get_unit_info`, `search_knowledge_base`, `create_maintenance_ticket`), draft reply → Approve / Edit, low-confidence handoff | todo |
 | 3 | Agent debug view | Every run stored (input, each tool call with args + result, final answer); run timeline UI; thumbs-down with note + blamed step | todo |
 | 4 | CSV import | Upload 5,000+ row CSV of buildings/units/tenants, batch processing with scheduled functions, live progress bar, error rows | todo |
