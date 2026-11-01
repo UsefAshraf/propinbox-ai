@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "setup": "convex dev --once",
+    "dev": "concurrently -k -n convex,next,setup -c magenta,cyan,gray \"convex dev\" \"next dev\" \"node scripts/bootstrap.mjs\"",
+    "dev:frontend": "next dev",
+    "dev:backend": "convex dev",
+    "seed": "convex run seed:run",
+    "seed:reset": "convex run seed:run \"{\\\"reset\\\": true}\"",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -31,6 +36,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^10.0.6",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",

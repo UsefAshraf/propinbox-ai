@@ -172,12 +172,27 @@ export default defineSchema({
         rating: v.union(v.literal("up"), v.literal("down")),
         note: v.optional(v.string()),
         stepIndex: v.optional(v.number()), // which step the reviewer blames
+        // Reviewer's diagnosis of what went wrong, so failures can be grouped and fixed.
+        rootCause: v.optional(
+          v.union(
+            v.literal("wrong_tool"), // called the wrong tool or skipped a needed one
+            v.literal("bad_tool_args"), // right tool, wrong arguments
+            v.literal("retrieval_miss"), // KB search didn't surface the right article
+            v.literal("missing_knowledge"), // the answer isn't in the KB at all
+            v.literal("reasoning"), // had the right facts, drew the wrong conclusion
+            v.literal("tone"), // content fine, wording/tone wrong
+            v.literal("should_have_handed_off"),
+            v.literal("other"),
+          ),
+        ),
+        resolved: v.optional(v.boolean()), // fix shipped (prompt / KB / tool change)
         at: v.number(),
       }),
     ),
   })
     .index("by_conversation", ["conversationId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_feedback_rating", ["feedback.rating"]),
 
   importJobs: defineTable({
     fileName: v.string(),

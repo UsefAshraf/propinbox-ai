@@ -1,7 +1,9 @@
 import { fakerDE as faker } from "@faker-js/faker";
 import { v } from "convex/values";
-import type { Id, TableNames } from "./_generated/dataModel";
+import type { Doc, Id, TableNames } from "./_generated/dataModel";
 import { internalMutation, type MutationCtx } from "./_generated/server";
+import { createTicketImpl, getUnitInfoImpl, lookupTenantImpl, searchKnowledgeBaseImpl } from "./agentRuns";
+import { DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_MODEL, SYSTEM_PROMPT } from "./lib/agentTools";
 import {
   BUILDINGS,
   CONVERSATIONS,
@@ -9,6 +11,8 @@ import {
   KNOWLEDGE_BASE,
   STAFF_NAMES,
   type ConversationScript,
+  type DemoRun,
+  type ScriptMessage,
 } from "./seedData";
 
 // npx convex run seed:run                  -> seeds an empty deployment
@@ -73,6 +77,250 @@ function unitLabel(floor: number, side: "links" | "rechts"): string {
 
 function preview(body: string): string {
   return body.replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function fill(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{(\w+)\}/g, (m, key: string) => vars[key] ?? m);
+}
+
+// ---------------------------------------------------------------- demo agent runs
+
+type PendingDemoRun = {
+  conversationId: Id<"conversations">;
+  run: DemoRun;
+  vars: Record<string, string>;
+  messages: (ScriptMessage & { at: number; id: Id<"messages"> })[];
+};
+
+/** Index of the message that triggered the run (see ConversationScript.demoRun). */
+function triggerIndex(demo: PendingDemoRun): number {
+  const firstAgent = demo.messages.findIndex((m) => m.from === "agent");
+  const end = firstAgent === -1 ? demo.messages.length : firstAgent;
+  for (let i = end - 1; i >= 0; i--) if (demo.messages[i].from === "contact") return i;
+  throw new Error("Demo run has no triggering contact message");
+}
+
+function triggerOf(demo: PendingDemoRun) {
+  return demo.messages[triggerIndex(demo)];
+}
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const TRANSCRIPT_MESSAGES = 20;
+
+/** Same format as `renderInput` in agent.ts (kept in sync by hand; agent.ts pulls in the SDK). */
+function renderInput(
+  conversation: Doc<"conversations">,
+  contact: Doc<"contacts"> | null,
+  messages: PendingDemoRun["messages"],
+  triggerId: Id<"messages">,
+  now: Date,
+): string {
+  const formatTime = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const lines: string[] = [];
+  lines.push(`Today is ${WEEKDAYS[now.getUTCDay()]}, ${now.toISOString().slice(0, 10)}.`);
+  lines.push("");
+  lines.push(`Channel: ${conversation.channel}`);
+  if (conversation.subject) lines.push(`Subject: ${conversation.subject}`);
+  if (contact) {
+    lines.push(`Sender: ${contact.name} (known ${contact.role}, ${conversation.channel} handle ${conversation.handle})`);
+  } else {
+    lines.push(
+      `Sender: unknown sender — ${conversation.channel} handle ${conversation.handle}` +
+        (conversation.displayName !== conversation.handle ? `, calls themselves "${conversation.displayName}"` : ""),
+    );
+  }
+  lines.push("");
+  lines.push(`Conversation (oldest first, last ${messages.length} messages):`);
+  for (const m of messages) {
+    const who =
+      m.from === "contact"
+        ? "SENDER"
+        : m.from === "agent"
+          ? "PROPERTY TEAM (agent draft, approved)"
+          : "PROPERTY TEAM (staff)";
+    const marker = m.id === triggerId ? "  <-- reply to this message" : "";
+    const body = m.body.length > 2000 ? `${m.body.slice(0, 1999)}…` : m.body;
+    lines.push("");
+    lines.push(`[${formatTime(m.at)}] ${who}:${marker}`);
+    lines.push(body);
+  }
+  lines.push("");
+  lines.push("Prepare the reply to the latest sender message. Remember to finish with draft_reply or handoff_to_human.");
+  return lines.join("\n");
+}
+
+/** Convex values can't contain `undefined` (mirrors agentRuns.appendStep). */
+function toStorable(value: unknown): unknown {
+  if (value === undefined) return null;
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
+/**
+ * Replays a scripted run the way agent.ts would record it: same model id, system prompt,
+ * rendered input and step shapes, with tool results produced by the real tool backends.
+ */
+async function seedDemoRun(ctx: MutationCtx, demo: PendingDemoRun, now: number) {
+  const { conversationId, run: spec, vars } = demo;
+  const conversation = (await ctx.db.get(conversationId))!;
+  const contact = conversation.contactId ? await ctx.db.get(conversation.contactId) : null;
+  const ti = triggerIndex(demo);
+  const trigger = demo.messages[ti];
+  const draft = demo.messages.find((m) => m.from === "agent");
+  const startedAt = trigger.at + 2400; // scheduled right after the inbound message
+  // Transcript as getContext builds it: up to the trigger, no pending drafts, last 20.
+  const transcript = demo.messages
+    .slice(0, ti + 1)
+    .filter((m) => !(m.from === "agent" && !m.sent))
+    .slice(-TRANSCRIPT_MESSAGES);
+
+  const runId = await ctx.db.insert("agentRuns", {
+    conversationId,
+    triggerMessageId: trigger.id,
+    trigger: "inbound",
+    status: "running",
+    model: DEFAULT_MODEL,
+    systemPrompt: SYSTEM_PROMPT,
+    input: renderInput(conversation, contact, transcript, trigger.id, new Date(startedAt)),
+    steps: [],
+  });
+
+  const steps: Doc<"agentRuns">["steps"] = [];
+  let senderUnitId: string | null = null;
+  let ticketsCreated = 0;
+  let outcome:
+    | { status: "drafted" | "handoff"; finalAnswer?: string; confidence?: number; handoffReason?: string }
+    | undefined;
+
+  for (const turn of spec.turns) {
+    steps.push({
+      kind: "model",
+      text: fill(turn.text, vars),
+      stopReason: "tool_use",
+      inputTokens: turn.inputTokens,
+      outputTokens: turn.outputTokens,
+      durationMs: turn.durationMs,
+    });
+    for (const call of turn.tools) {
+      let args: Record<string, unknown>;
+      let result: unknown;
+      let durationMs = 0;
+      switch (call.name) {
+        case "lookup_tenant": {
+          args = { query: call.query };
+          const r = await lookupTenantImpl(ctx, { conversationId, query: call.query });
+          if ("contacts" in r && r.contacts) senderUnitId = r.contacts.find((c) => c.is_sender)?.unit_id ?? null;
+          result = r;
+          durationMs = call.durationMs;
+          break;
+        }
+        case "get_unit_info": {
+          if (!senderUnitId) throw new Error("Demo run: get_unit_info before lookup_tenant found a unit");
+          args = { unit_id: senderUnitId };
+          result = await getUnitInfoImpl(ctx, { unitId: senderUnitId });
+          durationMs = call.durationMs;
+          break;
+        }
+        case "search_knowledge_base": {
+          args = { query: call.query, category: call.category };
+          result = await searchKnowledgeBaseImpl(ctx, { conversationId, query: call.query, category: call.category });
+          durationMs = call.durationMs;
+          break;
+        }
+        case "create_maintenance_ticket": {
+          const title = fill(call.title, vars);
+          const description = fill(call.description, vars);
+          args = { title, description, category: call.category, priority: call.priority, unit_id: null };
+          result = await createTicketImpl(ctx, {
+            conversationId,
+            runId,
+            title,
+            description,
+            category: call.category,
+            priority: call.priority,
+            unitId: null,
+          });
+          ticketsCreated++;
+          durationMs = call.durationMs;
+          break;
+        }
+        case "draft_reply": {
+          const reply = call.reply !== undefined ? fill(call.reply, vars) : draft?.body;
+          if (!reply) throw new Error("Demo run: draft_reply without a reply or agent message");
+          const reasoning = fill(call.reasoning, vars);
+          args = { reply, confidence: call.confidence, reasoning };
+          outcome =
+            call.confidence < DEFAULT_CONFIDENCE_THRESHOLD
+              ? {
+                  status: "handoff",
+                  finalAnswer: reply,
+                  confidence: call.confidence,
+                  handoffReason: `Low confidence (${call.confidence.toFixed(2)} < ${DEFAULT_CONFIDENCE_THRESHOLD}): ${reasoning}`,
+                }
+              : { status: "drafted", finalAnswer: reply, confidence: call.confidence };
+          break;
+        }
+        case "handoff_to_human": {
+          const reason = fill(call.reason, vars);
+          const summary = fill(call.summary, vars);
+          const suggested = call.suggested_reply === null ? null : fill(call.suggested_reply, vars);
+          args = { reason, summary, suggested_reply: suggested };
+          outcome = {
+            status: "handoff",
+            handoffReason: summary ? `${reason}\n\nSummary: ${summary}` : reason,
+            finalAnswer: suggested?.trim() || undefined,
+          };
+          break;
+        }
+      }
+      if (call.name === "draft_reply" || call.name === "handoff_to_human") {
+        // Terminal step, recorded exactly like agent.finishWithTerminal does.
+        result = { outcome: outcome!.status, ...(outcome!.handoffReason ? { handoff_reason: outcome!.handoffReason } : {}) };
+      }
+      const isError = typeof result === "object" && result !== null && "error" in result;
+      steps.push({ kind: "tool", name: call.name, args: toStorable(args), result: toStorable(result), isError, durationMs });
+    }
+  }
+  if (!outcome) throw new Error("Demo run must end with a terminal tool");
+
+  let draftMessageId: Id<"messages"> | undefined;
+  if (outcome.status === "drafted") {
+    if (!draft) throw new Error("Drafted demo run needs an agent message in the script");
+    draftMessageId = draft.id;
+    await ctx.db.patch(draft.id, { agentRunId: runId });
+  }
+
+  let feedback: Doc<"agentRuns">["feedback"];
+  if (spec.feedback) {
+    const f = spec.feedback;
+    const stepIndex = f.blameTool ? steps.findIndex((s) => s.kind === "tool" && s.name === f.blameTool) : -1;
+    feedback =
+      f.rating === "up"
+        ? { rating: "up", at: now - f.hoursAgo * 3600_000 }
+        : {
+            rating: "down",
+            ...(f.note ? { note: f.note } : {}),
+            ...(stepIndex >= 0 ? { stepIndex } : {}),
+            ...(f.rootCause ? { rootCause: f.rootCause } : {}),
+            resolved: f.resolved ?? false,
+            at: now - Math.round(f.hoursAgo * 3600_000),
+          };
+  }
+
+  // Wall time = model + tool time plus ~90 ms of Convex mutation round-trips per step.
+  const stepTime = steps.reduce((sum, s) => sum + s.durationMs, 0);
+  await ctx.db.patch(runId, {
+    status: outcome.status,
+    finalAnswer: outcome.finalAnswer,
+    confidence: outcome.confidence,
+    handoffReason: outcome.handoffReason,
+    draftMessageId,
+    durationMs: stepTime + steps.length * 90 + 140,
+    inputTokens: spec.turns.reduce((sum, t) => sum + t.inputTokens, 0),
+    outputTokens: spec.turns.reduce((sum, t) => sum + t.outputTokens, 0),
+    steps,
+    feedback,
+  });
+  return { ticketsCreated };
 }
 
 async function wipe(ctx: MutationCtx) {
@@ -210,12 +458,10 @@ export const run = internalMutation({
     }
 
     // ------------------------------------------------------------ conversations + messages
-    const fill = (text: string, vars: Record<string, string>) =>
-      text.replace(/\{(\w+)\}/g, (m, key: string) => vars[key] ?? m);
-
     let messageCount = 0;
     const conversationIds: Id<"conversations">[] = [];
     let ticketCount = 0;
+    const demoRuns: PendingDemoRun[] = [];
 
     for (const [ci, script] of CONVERSATIONS.entries()) {
       const staff = STAFF_NAMES[ci % STAFF_NAMES.length];
@@ -254,7 +500,7 @@ export const run = internalMutation({
         at: now - Math.round(m.hoursAgo * 3600 * 1000),
         body: fill(m.body, vars),
       }));
-      const lastReal = [...msgs].reverse().find((m) => m.from !== "agent");
+      const lastReal = [...msgs].reverse().find((m) => m.from !== "agent" || m.sent);
       if (!lastReal) throw new Error(`Script ${ci} has no non-draft message`);
 
       const conversationId = await ctx.db.insert("conversations", {
@@ -270,18 +516,25 @@ export const run = internalMutation({
       });
       conversationIds.push(conversationId);
 
+      const messageIds: Id<"messages">[] = [];
       for (const m of msgs) {
-        await ctx.db.insert("messages", {
-          conversationId,
-          direction: m.from === "contact" ? "inbound" : "outbound",
-          channel: script.channel,
-          author: m.from,
-          body: m.body,
-          status: m.from === "contact" ? "received" : m.from === "agent" ? "draft" : "sent",
-          // sentAt doubles as "received at" for inbound messages; drafts have none yet.
-          sentAt: m.from === "agent" ? undefined : m.at,
-        });
+        const isDraft = m.from === "agent" && !m.sent;
+        messageIds.push(
+          await ctx.db.insert("messages", {
+            conversationId,
+            direction: m.from === "contact" ? "inbound" : "outbound",
+            channel: script.channel,
+            author: m.from,
+            body: m.body,
+            status: m.from === "contact" ? "received" : isDraft ? "draft" : "sent",
+            // sentAt doubles as "received at" for inbound messages; drafts have none yet.
+            sentAt: isDraft ? undefined : m.at,
+          }),
+        );
         messageCount++;
+      }
+      if (script.demoRun) {
+        demoRuns.push({ conversationId, run: script.demoRun, vars, messages: msgs.map((m, i) => ({ ...m, id: messageIds[i] })) });
       }
 
       if (script.ticket) {
@@ -318,6 +571,15 @@ export const run = internalMutation({
       });
     }
 
+    // ------------------------------------------------------------ demo agent runs
+    // After the KB so the replayed knowledge-base searches see the articles. Oldest first,
+    // so _creationTime order matches the story order.
+    demoRuns.sort((a, b) => triggerOf(a).at - triggerOf(b).at);
+    for (const demo of demoRuns) {
+      const { ticketsCreated } = await seedDemoRun(ctx, demo, now);
+      ticketCount += ticketsCreated;
+    }
+
     const statusCounts: Record<ConversationScript["status"], number> = {
       open: 0,
       awaiting_approval: 0,
@@ -342,6 +604,7 @@ export const run = internalMutation({
         messages: messageCount,
         tickets: ticketCount,
         knowledgeBase: KNOWLEDGE_BASE.length,
+        agentRuns: demoRuns.length,
       },
     };
   },

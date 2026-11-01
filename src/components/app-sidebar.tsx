@@ -27,7 +27,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/tickets", label: "Tickets", icon: Wrench },
-  { href: "/runs", label: "Agent runs", icon: Bot, soon: true },
+  { href: "/runs", label: "Agent runs", icon: Bot },
   { href: "/import", label: "Import", icon: Upload, soon: true, disabled: true },
 ];
 
@@ -38,6 +38,8 @@ export function AppSidebar() {
     ? counts.awaiting_approval + counts.needs_human
     : undefined;
   const openTickets = useQuery(api.tickets.list, { status: "open" });
+  const runStats = useQuery(api.agentRuns.stats, {});
+  const unresolvedDown = runStats?.unresolvedDown;
   const pressingTickets = openTickets?.filter(
     (t) => t.priority === "urgent" || t.priority === "high",
   ).length;
@@ -81,6 +83,13 @@ export function AppSidebar() {
                   title={`${pressingTickets} open urgent/high-priority tickets`}
                 >
                   {pressingTickets}
+                </span>
+              ) : item.href === "/runs" && unresolvedDown ? (
+                <span
+                  className="hidden min-w-5 rounded-full bg-red-100 px-1.5 text-center text-[11px] font-semibold tabular-nums text-red-700 lg:inline"
+                  title={`${unresolvedDown} thumbs-down runs not yet resolved`}
+                >
+                  {unresolvedDown}
                 </span>
               ) : null}
             </>

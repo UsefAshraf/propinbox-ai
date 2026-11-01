@@ -6,8 +6,8 @@
 |---|-------|-------|--------|
 | 1 | Foundation + Live inbox | Schema, seed data, inbox UI (list + thread), HTTP webhook, "simulate incoming message" | done |
 | 2 | AI agent + draft flow | Scheduled action calling Claude with tools (`lookup_tenant`, `get_unit_info`, `search_knowledge_base`, `create_maintenance_ticket`), draft reply → Approve / Edit, low-confidence handoff | done (needs live key test) |
-| 3 | Agent debug view | Every run stored (input, each tool call with args + result, final answer); run timeline UI; thumbs-down with note + blamed step | todo |
-| 4 | CSV import | Upload 5,000+ row CSV of buildings/units/tenants, batch processing with scheduled functions, live progress bar, error rows | todo |
+| 3 | Agent debug view | Every run stored (input, each tool call with args + result, final answer); run timeline UI; thumbs-down with note + blamed step | done |
+| 4 | CSV import | Upload 5,000+ row CSV of buildings/units/tenants, batch processing with scheduled functions, live progress bar, error rows | in progress |
 | 5 | Ship | Deploy (Vercel + Convex cloud), README with architecture diagram + index rationale + "what I'd do next", demo video | todo |
 
 Priority if time runs short: 1 → 2 → 3 shipped and deployed beats a half-done 4.
@@ -86,6 +86,59 @@ All files under `convex/`. Types come from `convex/schema.ts`.
 - `list` — query `{ status?: TicketStatus }` → newest 100 tickets with `unitLabel`, `buildingName`, `contactName`.
 - `forConversation` — query `{ conversationId }` → tickets linked to the conversation or the contact's unit.
 - `setStatus` — mutation `{ ticketId, status }`.
+
+## Phase 3 API contract
+
+### `agentRuns.ts` additions
+- `submitFeedback` — mutation `{ runId, rating: "up" | "down", note?: string, stepIndex?: number, rootCause?: RootCause }`
+  → sets `feedback` (`at: Date.now()`, `resolved: false` for down). Validates `stepIndex` is within `steps`.
+  Up-vote clears note/stepIndex/rootCause. Calling again overwrites.
+- `clearFeedback` — mutation `{ runId }`.
+- `setFeedbackResolved` — mutation `{ runId, resolved: boolean }` (only when rating is down).
+- `list` — extend args to `{ status?: AgentRunStatus, feedback?: "down" | "up" | "unresolved" }` (uses
+  `by_feedback_rating` for feedback filters, newest first, max 50). Each item additionally gets
+  `toolNames: string[]` (non-terminal tools in call order), `stepCount`, so the list doesn't need full steps.
+- `stats` — query `{}` → `{ total, drafted, handoff, failed, running, thumbsDown, unresolvedDown, avgDurationMs,
+  avgTokens, rootCauses: Record<RootCause, number> }` over the newest 500 runs.
+- `forConversation` — query `{ conversationId }` → all runs for that conversation, newest first
+  (id, status, trigger, confidence, `_creationTime`, feedback rating) — for "other runs of this conversation".
+- `get` — extend the return to `{ run, conversation: { _id, displayName, channel, status } | null,
+  triggerMessage: Doc<"messages"> | null, draftMessage: Doc<"messages"> | null,
+  tickets: Doc<"tickets">[] (created by this run) } | null`.
+
+### Seeded demo runs (`seed.ts`)
+Realistic `agentRuns` with full step traces so the debug view is demo-able without an API key:
+one clean `drafted` run (lookup → unit → KB → draft, linked to a seeded draft), one `drafted` run that
+created an urgent ticket, one `handoff` (rent reduction request), and one bad answer with
+`feedback: { rating: "down", rootCause: "retrieval_miss", stepIndex: <the KB search step>, note }`
+where the KB search used a poor query and the reply stated wrong rubbish collection days.
+
+## Phase 4 API contract
+
+### CSV format (one flat file, one row per unit; tenant columns empty = vacant unit)
+`building_id,building_name,street,postal_code,city,year_built,unit_id,unit_label,floor,rooms,size_sqm,rent_eur,tenant_id,tenant_name,tenant_email,tenant_phone,move_in_date`
+- `*_id` columns are source ids → stored as `externalId` and used for **upserts** (re-importing the same file
+  updates instead of duplicating). Buildings repeat across rows; first occurrence wins per batch, later rows update.
+- Sample: `public/sample-data/properties-5000.csv` (~5,200 rows, ~2% deliberately invalid rows: missing
+  names, bad email, negative size, non-numeric rent, bad date, unknown city format…), generated
+  deterministically by `scripts/generate-csv.mjs` (`npm run generate:csv`). Fake data only.
+
+### Processing (`convex/imports.ts`)
+- `generateUploadUrl` — mutation `{}` → upload URL (Convex file storage).
+- `start` — mutation `{ storageId, fileName }` → `Id<"importJobs">`; creates job (`pending`) and schedules
+  `processChunk` with `offset: 0`.
+- `processChunk` — internalAction `{ jobId, offset }`: reads the file from storage, parses the CSV (RFC 4180
+  quoting, BOM, CRLF), sets `totalRows` on first chunk (`processing`), validates rows `[offset, offset+CHUNK)`
+  (CHUNK = 250), calls `applyChunk`, then **schedules itself** for the next offset (a chain of scheduled
+  functions, so no single function hits Convex time/size limits and progress is visible between chunks).
+  Header errors / unreadable file → job `failed`.
+- `applyChunk` — internalMutation `{ jobId, rows: ValidRow[], errors: {row, message}[], processed }`:
+  upserts buildings → units → contacts (role tenant) by `externalId` (indexes `by_externalId`), increments
+  `processedRows`, `insertedRows`, `errorCount`, appends errors (cap 200 stored), marks `completed` +
+  `finishedAt` on the last chunk.
+- `cancel` — mutation `{ jobId }` → status `failed` with a "cancelled" error; `processChunk` stops when it sees it.
+- `list` — query `{}` → newest 20 jobs (without the `errors` array). `get` — query `{ jobId }` → full job.
+- Row numbers in errors are 1-based CSV line numbers (header = line 1).
 
 ## Local dev
 

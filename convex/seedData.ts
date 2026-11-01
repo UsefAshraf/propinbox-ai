@@ -278,7 +278,7 @@ Please do not forget to deregister your electricity contract, to set up a mail f
 
   // ---------------------------------------------------------------- building-specific
   {
-    title: "Lindenhof: courtyard, bike room and bin area",
+    title: "Lindenhof: courtyard, bike room and bin collection days",
     category: "house_rules",
     buildingIndex: 0,
     body: `This article applies only to the Lindenhof building, Lindenstraße 14, Berlin.
@@ -287,7 +287,7 @@ The rear courtyard is shared with the neighbouring building Lindenstraße 16. Th
 
 The bicycle room is located in the basement of the side wing (Seitenflügel) and can be reached via the courtyard door with your building key. Space is limited to about 30 bicycles, so cargo bikes should be parked in the covered rack in the courtyard. Please do not lock bicycles to the drainpipes.
 
-The bin area is next to the courtyard gate. Brown bins are emptied on Thursdays, black bins on Tuesdays. Because the courtyard is used by children from both buildings, please do not leave glass bottles or sharp objects next to the bins.
+The bin area is next to the courtyard gate. Collection days at Lindenhof differ from the general calendar because the bins are shared with Lindenstraße 16: the black bins (Restmüll), the yellow bins (packaging / recycling) and the blue paper bins are all emptied every Tuesday morning; the brown bins (Bio) are emptied every Thursday morning. There is no Friday collection at Lindenhof. Please put out nothing next to the bins; if a bin is full, keep your bags until after Tuesday. Because the courtyard is used by children from both buildings, please do not leave glass bottles or sharp objects next to the bins.
 
 The caretaker for Lindenhof, Mr Schulte, is on site Monday and Wednesday from 08:00 to 12:00 and can be reached through the property management.`,
   },
@@ -320,9 +320,56 @@ The terrace furniture is stored in the box next to the door from November to Mar
 // ---------------------------------------------------------------- conversations
 
 export type ScriptMessage = {
-  from: "contact" | "staff" | "agent"; // agent messages are drafts (awaiting approval)
+  from: "contact" | "staff" | "agent"; // agent messages are drafts (awaiting approval)...
+  sent?: boolean; // ...unless `sent`: an agent draft that staff already approved
   hoursAgo: number;
   body: string;
+};
+
+// ---------------------------------------------------------------- demo agent runs
+// A scripted agent run attached to a conversation. seed.ts replays it through the real
+// tool backends (agentRuns.*Impl), so args/results look exactly like a live run.
+// Text fields may use the same {placeholders} as messages.
+
+export type DemoToolCall =
+  | { name: "lookup_tenant"; query: string | null; durationMs: number }
+  | { name: "get_unit_info"; durationMs: number } // unit_id = the sender's unit from lookup_tenant
+  | {
+      name: "search_knowledge_base";
+      query: string;
+      category: "house_rules" | "faq" | "procedures" | null;
+      durationMs: number;
+    }
+  | {
+      name: "create_maintenance_ticket";
+      title: string;
+      description: string;
+      category: "plumbing" | "electrical" | "heating" | "appliance" | "structural" | "pest" | "other";
+      priority: "low" | "medium" | "high" | "urgent";
+      durationMs: number;
+    }
+  // reply omitted = the body of the script's agent message (the draft this run produced)
+  | { name: "draft_reply"; reply?: string; confidence: number; reasoning: string }
+  | { name: "handoff_to_human"; reason: string; summary: string; suggested_reply: string | null };
+
+export type DemoTurn = {
+  text: string; // visible model text in this turn ("" when it only called tools)
+  inputTokens: number;
+  outputTokens: number;
+  durationMs: number;
+  tools: DemoToolCall[]; // tool_use blocks of this turn, in order (terminal last)
+};
+
+export type DemoRun = {
+  turns: DemoTurn[];
+  feedback?: {
+    rating: "up" | "down";
+    rootCause?: "wrong_tool" | "bad_tool_args" | "retrieval_miss" | "missing_knowledge" | "reasoning" | "tone" | "should_have_handed_off" | "other";
+    blameTool?: DemoToolCall["name"]; // stepIndex = first step calling this tool
+    note?: string;
+    resolved?: boolean;
+    hoursAgo: number;
+  };
 };
 
 export type ConversationScript = {
@@ -333,6 +380,9 @@ export type ConversationScript = {
   status: "open" | "awaiting_approval" | "needs_human" | "closed";
   unread: boolean;
   messages: ScriptMessage[];
+  // Agent run triggered by the last contact message before the first agent message
+  // (or the last contact message when there is none). Its draft = that agent message.
+  demoRun?: DemoRun;
   ticket?: {
     title: string;
     description: string;
@@ -487,9 +537,46 @@ PropInbox Hausverwaltung`,
       {
         from: "agent",
         hoursAgo: 25.8,
-        body: `Thanks {first}. Since there was nothing with your address, the lock does not need to be replaced. We will order replacement keys through our locksmith using the security card – this takes about 7–10 working days. Costs are approx. 35–60 € per security key and about 15 € for the letterbox key. Many personal liability insurances cover lost keys, so it's worth checking your policy. Shall we place the order for one apartment/front-door key and one letterbox key?`,
+        body: `Thanks {first}. Since there was nothing with your address, the lock does not need to be replaced. We will order replacement keys through our locksmith using the security card – this takes about 7–10 working days. Costs are approx. 35–60 € per security key and about 15 € for the letterbox key. Many personal liability insurances cover lost keys, so it's worth checking your policy. Shall we place the order for one apartment/front-door key and one letterbox key?
+
+Your PropInbox property team`,
       },
     ],
+    demoRun: {
+      turns: [
+        {
+          text: "",
+          inputTokens: 3618,
+          outputTokens: 142,
+          durationMs: 2380,
+          tools: [{ name: "lookup_tenant", query: null, durationMs: 18 }],
+        },
+        {
+          text: "Known tenant with a unit on file. Checking the unit for open issues and the policy for replacement keys.",
+          inputTokens: 4107,
+          outputTokens: 196,
+          durationMs: 2910,
+          tools: [
+            { name: "get_unit_info", durationMs: 24 },
+            { name: "search_knowledge_base", query: "lost key replacement", category: "faq", durationMs: 41 },
+          ],
+        },
+        {
+          text: "",
+          inputTokens: 5862,
+          outputTokens: 388,
+          durationMs: 4720,
+          tools: [
+            {
+              name: "draft_reply",
+              confidence: 0.91,
+              reasoning:
+                "Process, 7–10 working days and costs (35–60 € per security key, ~15 € letterbox key) come from the 'Lost keys and key replacement costs' FAQ. Nothing with the address was lost, so per the same article no cylinder change is needed.",
+            },
+          ],
+        },
+      ],
+    },
   },
   {
     channel: "phone",
@@ -853,6 +940,221 @@ Kind regards,
 {name}`,
       },
     ],
+  },
+
+  // ---------------------------------------------------------------- with demo agent runs
+  // Bad answer (thumbs-down): vague KB query missed the Lindenhof-specific schedule.
+  {
+    channel: "whatsapp",
+    sender: { kind: "tenant", index: 6 }, // Lindenhof
+    status: "closed",
+    unread: false,
+    messages: [
+      {
+        from: "contact",
+        hoursAgo: 74,
+        body: `Hi, I moved in two weeks ago. Which day are the yellow bin and the paper bin collected here? Both are full and I don't want to leave my bags next to them`,
+      },
+      {
+        from: "agent",
+        sent: true,
+        hoursAgo: 73.6,
+        body: `Hi {first}, welcome to {building}! The yellow bin and the blue paper bin are emptied every second Friday. The current collection calendar of the city also hangs on the notice board in the entrance hall.
+
+Your PropInbox property team`,
+      },
+      {
+        from: "contact",
+        hoursAgo: 23,
+        body: `I put my bags out on Friday like you said but nothing was collected and the bins are still full. My neighbour says recycling here is picked up on Tuesdays?`,
+      },
+      {
+        from: "staff",
+        hoursAgo: 21,
+        body: `Hi {first}, sorry, your neighbour is right and our earlier message was wrong: at {building} the yellow and the paper bins are emptied every Tuesday morning (brown bin on Thursdays). There is no Friday collection in your building. Apologies for the trouble!
+
+{staff}`,
+      },
+    ],
+    demoRun: {
+      turns: [
+        {
+          text: "",
+          inputTokens: 3544,
+          outputTokens: 128,
+          durationMs: 2210,
+          tools: [{ name: "lookup_tenant", query: null, durationMs: 16 }],
+        },
+        {
+          text: "",
+          inputTokens: 3981,
+          outputTokens: 104,
+          durationMs: 1840,
+          tools: [{ name: "search_knowledge_base", query: "waste", category: null, durationMs: 37 }],
+        },
+        {
+          text: "",
+          inputTokens: 5316,
+          outputTokens: 251,
+          durationMs: 3360,
+          tools: [
+            {
+              name: "draft_reply",
+              confidence: 0.86,
+              reasoning:
+                "Collection days from the 'Rubbish separation and collection days' house rule: yellow bin and paper bin every second Friday.",
+            },
+          ],
+        },
+      ],
+      feedback: {
+        rating: "down",
+        rootCause: "retrieval_miss",
+        blameTool: "search_knowledge_base",
+        note: "Searched 'waste' — missed the building-specific collection schedule (Tuesday). Reply said Friday.",
+        resolved: false,
+        hoursAgo: 20.5,
+      },
+    },
+  },
+  // Handoff: rent reduction request.
+  {
+    channel: "email",
+    sender: { kind: "tenant", index: 36 },
+    subject: "Rent reduction because of construction noise and heating outage",
+    status: "needs_human",
+    unread: true,
+    messages: [
+      {
+        from: "contact",
+        hoursAgo: 10,
+        body: `Dear Sir or Madam,
+
+for three weeks now there has been scaffolding in front of our windows and the roof works start at 7 in the morning, including Saturdays. There is drilling and hammering all day, and I work from home. On top of that, the heating in the whole building was out from Monday to Thursday last week, and we had to borrow electric heaters from friends.
+
+I think this justifies a rent reduction. I would like a reduction of 20 % for October and for every month the construction work continues. Please confirm in writing.
+
+Kind regards,
+{name}
+{street}, {unit}`,
+      },
+    ],
+    ticket: {
+      title: "Building-wide heating outage – boiler fault",
+      description: "Central boiler fault, whole building without heating Monday to Thursday. Heating partner replaced the ignition module; system running normally again.",
+      category: "heating",
+      priority: "urgent",
+      status: "resolved",
+    },
+    demoRun: {
+      turns: [
+        {
+          text: "I'll identify the sender first.",
+          inputTokens: 3796,
+          outputTokens: 151,
+          durationMs: 2560,
+          tools: [{ name: "lookup_tenant", query: null, durationMs: 15 }],
+        },
+        {
+          text: "",
+          inputTokens: 4268,
+          outputTokens: 133,
+          durationMs: 2190,
+          tools: [{ name: "get_unit_info", durationMs: 22 }],
+        },
+        {
+          text: "This is a rent reduction request; per policy a staff member has to decide. No open repair ticket is needed: the heating is working again and the roof works are planned.",
+          inputTokens: 4734,
+          outputTokens: 467,
+          durationMs: 5240,
+          tools: [
+            {
+              name: "handoff_to_human",
+              reason: "Rent reduction request (construction noise + heating outage)",
+              summary:
+                "{name} ({building}, {unit}) asks for a 20 % rent reduction for October and for every further month of the roof works, citing scaffolding and construction noise from 7:00 incl. Saturdays and last week's four-day building-wide heating outage. Wants written confirmation. No ticket created: the heating is working again and no open ticket exists for the unit.",
+              suggested_reply:
+                "Dear {name},\n\nthank you for your message, and we are sorry for the disruption caused by the roof works and last week's heating outage. We have passed your request for a rent reduction on to the responsible colleague, who will review it and get back to you in writing.\n\nKind regards,\nYour PropInbox property team",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Drafted + urgent ticket: active leak through the ceiling.
+  {
+    channel: "whatsapp",
+    sender: { kind: "tenant", index: 22 },
+    status: "awaiting_approval",
+    unread: true,
+    messages: [
+      {
+        from: "contact",
+        hoursAgo: 1.2,
+        body: `Help, water is dripping from my bathroom ceiling, right next to the lamp!! It's getting faster. I rang upstairs but nobody is home. {building}, {unit}`,
+      },
+      {
+        from: "agent",
+        hoursAgo: 1.18,
+        body: `Hi {first}, thanks for telling us right away. Please switch off the bathroom light at the fuse box and don't touch the lamp while water is near it. Put a bucket under the drip, move towels and valuables out of the way and take a few photos for the insurance.
+
+We have opened an urgent maintenance request and our plumbing partner will contact you shortly to come out. If the water gets heavier in the meantime, call our 24/7 emergency line: +49 30 1234 5670.
+
+Your PropInbox property team`,
+      },
+    ],
+    demoRun: {
+      turns: [
+        {
+          text: "",
+          inputTokens: 3581,
+          outputTokens: 139,
+          durationMs: 2050,
+          tools: [{ name: "lookup_tenant", query: null, durationMs: 17 }],
+        },
+        {
+          text: "Active leak next to a light fitting. Checking for an existing ticket on the unit and the leak procedure.",
+          inputTokens: 4072,
+          outputTokens: 212,
+          durationMs: 2840,
+          tools: [
+            { name: "get_unit_info", durationMs: 21 },
+            { name: "search_knowledge_base", query: "water leak ceiling", category: "procedures", durationMs: 44 },
+          ],
+        },
+        {
+          text: "No open ticket for this unit. Creating an urgent plumbing ticket (active leak, electrical hazard).",
+          inputTokens: 5794,
+          outputTokens: 318,
+          durationMs: 3980,
+          tools: [
+            {
+              name: "create_maintenance_ticket",
+              title: "Water dripping through bathroom ceiling next to light",
+              description:
+                "Active leak: water dripping from the bathroom ceiling next to the ceiling lamp, getting faster. Source is most likely the apartment above (tenant rang, nobody home). Electrical hazard because of the lamp. Plumber needed urgently; access to the apartment above may be required.",
+              category: "plumbing",
+              priority: "urgent",
+              durationMs: 29,
+            },
+          ],
+        },
+        {
+          text: "",
+          inputTokens: 6143,
+          outputTokens: 486,
+          durationMs: 5610,
+          tools: [
+            {
+              name: "draft_reply",
+              confidence: 0.88,
+              reasoning:
+                "Safety steps, photos and the 24/7 emergency number come from 'Emergency procedure: water leak or burst pipe'. Urgent plumbing ticket created; no appointment time promised.",
+            },
+          ],
+        },
+      ],
+    },
   },
 ];
 

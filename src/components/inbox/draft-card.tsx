@@ -31,10 +31,11 @@ export function DraftCard({ message }: { message: Doc<"messages"> }) {
   const approveDraft = useMutation(api.messages.approveDraft);
   const discardDraft = useMutation(api.messages.discardDraft);
   // Seeded drafts have no run; agent drafts link back to the run that wrote them.
-  const run = useQuery(
+  const runDetail = useQuery(
     api.agentRuns.get,
     message.agentRunId ? { runId: message.agentRunId } : "skip",
   );
+  const run = runDetail?.run;
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(message.body);
   const [pending, setPending] = useState<Pending>(null);
