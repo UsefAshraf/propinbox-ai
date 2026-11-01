@@ -8,14 +8,18 @@
  * @module
  */
 
+import type * as agent from "../agent.js";
+import type * as agentRuns from "../agentRuns.js";
 import type * as conversations from "../conversations.js";
 import type * as http from "../http.js";
 import type * as ingest from "../ingest.js";
+import type * as lib_agentTools from "../lib/agentTools.js";
 import type * as lib_normalize from "../lib/normalize.js";
 import type * as lib_validators from "../lib/validators.js";
 import type * as messages from "../messages.js";
 import type * as seed from "../seed.js";
 import type * as seedData from "../seedData.js";
+import type * as tickets from "../tickets.js";
 
 import type {
   ApiFromModules,
@@ -24,14 +28,18 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  agent: typeof agent;
+  agentRuns: typeof agentRuns;
   conversations: typeof conversations;
   http: typeof http;
   ingest: typeof ingest;
+  "lib/agentTools": typeof lib_agentTools;
   "lib/normalize": typeof lib_normalize;
   "lib/validators": typeof lib_validators;
   messages: typeof messages;
   seed: typeof seed;
   seedData: typeof seedData;
+  tickets: typeof tickets;
 }>;
 
 /**

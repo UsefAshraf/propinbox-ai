@@ -1,5 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, mutation, type MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { channel } from "./schema";
 import { type Channel, makePreview, normalizeHandle } from "./lib/normalize";
@@ -87,7 +88,14 @@ export async function receiveMessageImpl(
     sentAt: now,
   });
 
-  // Phase 2: schedule the agent run here (ctx.scheduler.runAfter(0, internal.agent.run, ...))
+  // Let the agent draft a reply (kill switch: `npx convex env set AGENT_DISABLED true`).
+  if (process.env.AGENT_DISABLED !== "true") {
+    await ctx.scheduler.runAfter(0, internal.agent.run, {
+      conversationId,
+      triggerMessageId: messageId,
+      trigger: "inbound",
+    });
+  }
 
   return { conversationId, messageId };
 }

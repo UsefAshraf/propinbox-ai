@@ -56,6 +56,7 @@ export default defineSchema({
     .index("by_email", ["email"])
     .index("by_phone", ["phone"])
     .index("by_unit", ["unitId"])
+    .index("by_role", ["role"])
     .index("by_externalId", ["externalId"])
     .searchIndex("search_name", { searchField: "name" }),
 
@@ -86,7 +87,9 @@ export default defineSchema({
     status: messageStatus,
     agentRunId: v.optional(v.id("agentRuns")),
     sentAt: v.optional(v.number()),
-  }).index("by_conversation", ["conversationId"]),
+  })
+    .index("by_conversation", ["conversationId"])
+    .index("by_conversation_status", ["conversationId", "status"]),
 
   tickets: defineTable({
     title: v.string(),
@@ -154,12 +157,16 @@ export default defineSchema({
         }),
       ),
     ),
+    // The reply the agent proposed (also kept on handoff, so a human can reuse it).
     finalAnswer: v.optional(v.string()),
     confidence: v.optional(v.number()), // 0..1, self-reported
     handoffReason: v.optional(v.string()),
     error: v.optional(v.string()),
     draftMessageId: v.optional(v.id("messages")),
     durationMs: v.optional(v.number()),
+    inputTokens: v.optional(v.number()),
+    outputTokens: v.optional(v.number()),
+    trigger: v.optional(v.union(v.literal("inbound"), v.literal("manual_rerun"))),
     feedback: v.optional(
       v.object({
         rating: v.union(v.literal("up"), v.literal("down")),

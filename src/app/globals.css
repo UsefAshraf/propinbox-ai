@@ -47,6 +47,17 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --animate-row-flash: row-flash 2.4s ease-out both;
+  --animate-agent-shimmer: agent-shimmer 2.2s ease-in-out infinite;
+
+  @keyframes agent-shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    60%,
+    100% {
+      transform: translateX(100%);
+    }
+  }
 
   @keyframes row-flash {
     0% {

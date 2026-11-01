@@ -1,20 +1,40 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import Link from "next/link";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { Check, Loader2, Pencil, Sparkles, Trash2, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  Check,
+  Loader2,
+  Pencil,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Doc } from "@convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { CHANNELS } from "@/lib/inbox";
+import {
+  confidenceTone,
+  formatConfidence,
+  runHref,
+} from "@/lib/agent";
+import { cn } from "@/lib/utils";
 
 type Pending = "approve" | "discard" | null;
 
 export function DraftCard({ message }: { message: Doc<"messages"> }) {
   const approveDraft = useMutation(api.messages.approveDraft);
   const discardDraft = useMutation(api.messages.discardDraft);
+  // Seeded drafts have no run; agent drafts link back to the run that wrote them.
+  const run = useQuery(
+    api.agentRuns.get,
+    message.agentRunId ? { runId: message.agentRunId } : "skip",
+  );
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(message.body);
   const [pending, setPending] = useState<Pending>(null);
@@ -67,9 +87,29 @@ export function DraftCard({ message }: { message: Doc<"messages"> }) {
           <span className="text-xs font-semibold text-amber-900">
             Draft reply by AI agent
           </span>
-          <span className="ml-auto text-[11px] text-amber-700/80">
+          {run?.confidence !== undefined && (
+            <span
+              className={cn(
+                "inline-flex h-4.5 items-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums ring-1 ring-inset",
+                confidenceTone(run.confidence),
+              )}
+              title="Agent's self-reported confidence"
+            >
+              {formatConfidence(run.confidence)} confident
+            </span>
+          )}
+          <span className="ml-auto hidden text-[11px] text-amber-700/80 sm:inline">
             Not sent · needs your approval
           </span>
+          {message.agentRunId && (
+            <Link
+              href={runHref(message.agentRunId)}
+              className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-[11px] font-medium text-amber-800 hover:bg-amber-200/50 hover:text-amber-950 sm:ml-0"
+            >
+              View run
+              <ArrowUpRight className="size-3" />
+            </Link>
+          )}
         </div>
 
         <div className="px-3.5 py-3">

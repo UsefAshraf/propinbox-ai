@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
 import { isSameDay } from "date-fns";
 import type { Doc } from "@convex/_generated/dataModel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,17 +16,25 @@ export function MessageThread({
   messages,
   conversation,
   contactName,
+  footer,
+  footerKey,
 }: {
   messages: Doc<"messages">[] | undefined;
   conversation: Doc<"conversations"> | undefined;
   contactName: string;
+  /** Rendered after the last message (e.g. the live agent status row). */
+  footer?: ReactNode;
+  /** Changes whenever the footer grows, so the thread keeps it in view. */
+  footerKey?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSeen = useRef<string | null>(null);
   const now = useNow(60_000);
 
   const tail = messages?.at(-1);
-  const tailKey = tail ? `${tail._id}:${tail.status}:${tail.body.length}` : null;
+  const tailKey = tail
+    ? `${tail._id}:${tail.status}:${tail.body.length}:${footerKey ?? ""}`
+    : null;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -88,6 +96,7 @@ export function MessageThread({
             );
           })
         )}
+        {messages !== undefined && footer}
       </div>
     </div>
   );

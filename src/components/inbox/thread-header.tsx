@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import {
   ArrowLeft,
   CheckCircle2,
+  Loader2,
   PanelRightClose,
   PanelRightOpen,
   RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { api } from "@convex/_generated/api";
 import type { Doc } from "@convex/_generated/dataModel";
@@ -20,6 +23,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { errorMessage } from "@/lib/agent";
 import {
   CHANNELS,
   ROLE_LABELS,
@@ -37,15 +46,19 @@ const STATUS_ITEMS = Object.fromEntries(
 export function ThreadHeader({
   conversation,
   contact,
+  agentRunning,
   panelOpen,
   onTogglePanel,
 }: {
   conversation: Doc<"conversations">;
   contact: ContactDetail | null;
+  agentRunning: boolean;
   panelOpen: boolean;
   onTogglePanel: () => void;
 }) {
   const setStatus = useMutation(api.conversations.setStatus);
+  const rerunAgent = useMutation(api.agentRuns.rerun);
+  const [rerunning, setRerunning] = useState(false);
   const channel = CHANNELS[conversation.channel];
   const ChannelIcon = channel.icon;
 
@@ -61,7 +74,24 @@ export function ThreadHeader({
     }
   }
 
+  async function rerun() {
+    setRerunning(true);
+    try {
+      await rerunAgent({ conversationId: conversation._id });
+      toast.success("Agent re-run started", {
+        description: "It will draft a fresh reply from the latest message.",
+      });
+    } catch (err) {
+      toast.error("Couldn't re-run the agent", {
+        description: errorMessage(err),
+      });
+    } finally {
+      setRerunning(false);
+    }
+  }
+
   const closed = conversation.status === "closed";
+  const rerunBusy = rerunning || agentRunning;
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b px-3 md:px-5">
@@ -100,6 +130,25 @@ export function ThreadHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="outline"
+                size="icon-sm"
+                className="text-violet-700 hover:bg-violet-50 hover:text-violet-800"
+                onClick={rerun}
+                disabled={rerunBusy}
+                aria-label="Re-run agent"
+              />
+            }
+          >
+            {rerunBusy ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {agentRunning ? "Agent is running…" : "Re-run agent"}
+          </TooltipContent>
+        </Tooltip>
         <Select
           items={STATUS_ITEMS}
           value={conversation.status}

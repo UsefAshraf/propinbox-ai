@@ -18,14 +18,17 @@ type NavItem = {
   href: string;
   label: string;
   icon: LucideIcon;
+  /** Shows a "Soon" chip. */
   soon?: boolean;
+  /** Rendered non-interactive (the page doesn't exist yet). */
+  disabled?: boolean;
 };
 
 const NAV: NavItem[] = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/tickets", label: "Tickets", icon: Wrench },
   { href: "/runs", label: "Agent runs", icon: Bot, soon: true },
-  { href: "/tickets", label: "Tickets", icon: Wrench, soon: true },
-  { href: "/import", label: "Import", icon: Upload, soon: true },
+  { href: "/import", label: "Import", icon: Upload, soon: true, disabled: true },
 ];
 
 export function AppSidebar() {
@@ -34,6 +37,10 @@ export function AppSidebar() {
   const attention = counts
     ? counts.awaiting_approval + counts.needs_human
     : undefined;
+  const openTickets = useQuery(api.tickets.list, { status: "open" });
+  const pressingTickets = openTickets?.filter(
+    (t) => t.priority === "urgent" || t.priority === "high",
+  ).length;
 
   return (
     <aside className="flex w-14 shrink-0 flex-col border-r bg-sidebar lg:w-52">
@@ -51,7 +58,8 @@ export function AppSidebar() {
 
       <nav className="flex flex-1 flex-col gap-0.5 p-2">
         {NAV.map((item) => {
-          const active = pathname.startsWith(item.href);
+          const active =
+            pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
           const content = (
             <>
@@ -67,6 +75,13 @@ export function AppSidebar() {
                 <span className="hidden min-w-5 rounded-full bg-amber-100 px-1.5 text-center text-[11px] font-semibold tabular-nums text-amber-800 lg:inline">
                   {attention}
                 </span>
+              ) : item.href === "/tickets" && pressingTickets ? (
+                <span
+                  className="hidden min-w-5 rounded-full bg-red-100 px-1.5 text-center text-[11px] font-semibold tabular-nums text-red-700 lg:inline"
+                  title={`${pressingTickets} open urgent/high-priority tickets`}
+                >
+                  {pressingTickets}
+                </span>
               ) : null}
             </>
           );
@@ -75,11 +90,11 @@ export function AppSidebar() {
             active
               ? "bg-white font-medium text-foreground shadow-xs ring-1 ring-zinc-200"
               : "text-zinc-600",
-            item.soon
+            item.disabled
               ? "cursor-not-allowed text-zinc-400"
               : !active && "hover:bg-zinc-200/50 hover:text-foreground",
           );
-          return item.soon ? (
+          return item.disabled ? (
             <span
               key={item.href}
               className={className}

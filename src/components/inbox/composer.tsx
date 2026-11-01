@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { useMutation } from "convex/react";
 import { toast } from "sonner";
 import { ArrowUp, Loader2 } from "lucide-react";
@@ -12,11 +12,17 @@ import { cn } from "@/lib/utils";
 
 export function Composer({
   conversation,
+  value: body,
+  onChange: setBody,
+  textareaRef,
 }: {
   conversation: Doc<"conversations">;
+  /** Controlled so agent suggestions can fill the composer. */
+  value: string;
+  onChange: (value: string) => void;
+  textareaRef?: Ref<HTMLTextAreaElement>;
 }) {
   const sendStaffReply = useMutation(api.messages.sendStaffReply);
-  const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
   const channel = CHANNELS[conversation.channel];
   const ChannelIcon = channel.icon;
@@ -43,6 +49,7 @@ export function Composer({
       <div className="mx-auto max-w-3xl">
         <div className="rounded-xl border border-zinc-200 bg-white shadow-xs transition-shadow focus-within:border-zinc-300 focus-within:ring-3 focus-within:ring-zinc-900/5">
           <textarea
+            ref={textareaRef}
             value={body}
             onChange={(e) => setBody(e.target.value)}
             onKeyDown={(e) => {

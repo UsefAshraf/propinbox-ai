@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ContactAvatar } from "./contact-avatar";
 import { StatusBadge } from "./status-badge";
+import { ConversationTickets } from "./conversation-tickets";
 
 export function ContactPanel({
   data,
@@ -68,6 +69,7 @@ function PanelBody({ data }: { data: ConversationDetail }) {
             your portfolio.
           </p>
         </Section>
+        <ConversationTickets conversationId={conversation._id} />
       </>
     );
   }
@@ -109,6 +111,8 @@ function PanelBody({ data }: { data: ConversationDetail }) {
           </Field>
         )}
       </Section>
+
+      <ConversationTickets conversationId={conversation._id} />
 
       {unit && (
         <Section title={`Unit ${unit.label}`}>
