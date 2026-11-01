@@ -46,6 +46,16 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --animate-row-flash: row-flash 2.4s ease-out both;
+
+  @keyframes row-flash {
+    0% {
+      background-color: oklch(0.93 0.07 85 / 0.9);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
 }
 
 :root {
@@ -126,5 +136,11 @@
   }
   html {
     @apply font-sans;
+  }
+}
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
   }
 }

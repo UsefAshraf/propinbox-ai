@@ -8,13 +8,31 @@
  * @module
  */
 
+import type * as conversations from "../conversations.js";
+import type * as http from "../http.js";
+import type * as ingest from "../ingest.js";
+import type * as lib_normalize from "../lib/normalize.js";
+import type * as lib_validators from "../lib/validators.js";
+import type * as messages from "../messages.js";
+import type * as seed from "../seed.js";
+import type * as seedData from "../seedData.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  conversations: typeof conversations;
+  http: typeof http;
+  ingest: typeof ingest;
+  "lib/normalize": typeof lib_normalize;
+  "lib/validators": typeof lib_validators;
+  messages: typeof messages;
+  seed: typeof seed;
+  seedData: typeof seedData;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.
