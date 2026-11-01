@@ -195,6 +195,11 @@ src/components/        UI components (shadcn/ui based)
 
 ## What I'd do next
 
+- **Bulk CSV import with live progress.** The `importJobs` table is already in the schema. The plan:
+  upload a CSV of buildings, units and tenants (5,000+ rows) to Convex file storage, then process it with a
+  chain of scheduled functions, 250 rows per batch, upserting by source id (`by_externalId` indexes) so
+  re-imports don't duplicate. A live progress bar and an error-row table would update reactively as each
+  batch commits.
 - **Evals from feedback.** Turn every thumbs-down run into a regression test (input transcript and expected
   behaviour). Run the suite on every prompt or knowledge-base change and track the pass rate over time.
 - **Vector search** next to full-text search for the knowledge base (Convex vector indexes plus an

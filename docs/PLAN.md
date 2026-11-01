@@ -7,8 +7,8 @@
 | 1 | Foundation + Live inbox | Schema, seed data, inbox UI (list + thread), HTTP webhook, "simulate incoming message" | done |
 | 2 | AI agent + draft flow | Scheduled action calling Claude with tools (`lookup_tenant`, `get_unit_info`, `search_knowledge_base`, `create_maintenance_ticket`), draft reply → Approve / Edit, low-confidence handoff | done (needs live key test) |
 | 3 | Agent debug view | Every run stored (input, each tool call with args + result, final answer); run timeline UI; thumbs-down with note + blamed step | done |
-| 4 | CSV import | Upload 5,000+ row CSV of buildings/units/tenants, batch processing with scheduled functions, live progress bar, error rows | in progress |
-| 5 | Ship | Deploy (Vercel + Convex cloud), README with architecture diagram + index rationale + "what I'd do next", demo video | todo |
+| 4 | CSV import | Upload 5,000+ row CSV of buildings/units/tenants, batch processing with scheduled functions, live progress bar, error rows | not built (see README "What I'd do next") |
+| 5 | Ship | Deploy (Vercel + Convex cloud), README with architecture diagram + index rationale + "what I'd do next", demo video | repo + README done; deploy skipped |
 
 Priority if time runs short: 1 → 2 → 3 shipped and deployed beats a half-done 4.
 
