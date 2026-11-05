@@ -15,6 +15,7 @@ import {
   Clock,
   Coins,
   Cpu,
+  Download,
   Hand,
   History,
   ListTree,
@@ -33,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/tickets/ticket-badges";
 import { useNow } from "@/hooks/use-now";
+import { downloadFile } from "@/lib/download";
 import { errorMessage, runHref, type AgentRun } from "@/lib/agent";
 import { CHANNELS } from "@/lib/inbox";
 import {
@@ -122,6 +124,12 @@ function Loaded({
     }
   }
 
+  /** Downloads the full trace (run + linked messages/tickets) as JSON, e.g. for a bug report or eval set. */
+  function exportTrace() {
+    const trace = { exportedAt: new Date().toISOString(), ...data };
+    downloadFile(`agent-run-${run._id}.json`, JSON.stringify(trace, null, 2), "application/json");
+  }
+
   function startEdit(stepIndex?: number) {
     setDraft({ ...draftFromRun(run), ...(stepIndex !== undefined ? { stepIndex } : {}) });
     setEditing(true);
@@ -205,6 +213,15 @@ function Loaded({
               <span className="hidden sm:inline">Open conversation</span>
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportTrace}
+            title="Download this run's full trace as JSON"
+          >
+            <Download />
+            <span className="hidden sm:inline">Export trace</span>
+          </Button>
           <Button
             size="sm"
             onClick={rerun}
