@@ -89,3 +89,24 @@ export const CATEGORIES: Record<
   pest: { label: "Pest", icon: Bug },
   other: { label: "Other", icon: Wrench },
 };
+
+const CSV_COLUMNS: [header: string, value: (t: TicketListItem) => unknown][] = [
+  ["id", (t) => t._id],
+  ["created_at", (t) => new Date(t._creationTime).toISOString()],
+  ["title", (t) => t.title],
+  ["description", (t) => t.description],
+  ["category", (t) => t.category],
+  ["priority", (t) => t.priority],
+  ["status", (t) => t.status],
+  ["unit", (t) => t.unitLabel],
+  ["building", (t) => t.buildingName],
+  ["contact", (t) => t.contactName],
+  ["created_by", (t) => t.createdBy],
+];
+
+/** Serialises tickets as RFC 4180 CSV (quoted fields, doubled quotes), ready for Excel / Sheets. */
+export function ticketsToCsv(tickets: TicketListItem[]): string {
+  const cell = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const rows = tickets.map((t) => CSV_COLUMNS.map(([, value]) => cell(value(t))).join(","));
+  return [CSV_COLUMNS.map(([header]) => header).join(","), ...rows].join("\r\n");
+}

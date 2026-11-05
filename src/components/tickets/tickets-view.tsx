@@ -5,8 +5,9 @@ import { formatDistanceStrict } from "date-fns";
 import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { Building2, MessageSquare, Wrench } from "lucide-react";
+import { Building2, Download, MessageSquare, Wrench } from "lucide-react";
 import { api } from "@convex/_generated/api";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -25,12 +26,14 @@ import {
 } from "@/components/ui/table";
 import { useNow } from "@/hooks/use-now";
 import { errorMessage } from "@/lib/agent";
+import { downloadFile } from "@/lib/download";
 import {
   TICKET_STATUSES,
   TICKET_STATUS_FILTERS,
   type TicketListItem,
   type TicketStatus,
   type TicketStatusFilter,
+  ticketsToCsv,
 } from "@/lib/tickets";
 import { cn } from "@/lib/utils";
 import {
@@ -62,6 +65,13 @@ export function TicketsView() {
   };
   const aiCount = all?.filter((t) => t.createdBy === "agent").length;
 
+  function exportCsv() {
+    if (!tickets) return;
+    const date = new Date().toISOString().slice(0, 10);
+    // BOM so Excel opens umlauts (München, Köln…) correctly.
+    downloadFile(`tickets-${filter}-${date}.csv`, "\uFEFF" + ticketsToCsv(tickets), "text/csv;charset=utf-8");
+  }
+
   return (
     <main className="flex min-w-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 md:px-6">
@@ -73,12 +83,24 @@ export function TicketsView() {
             </span>
           )}
         </div>
-        {aiCount !== undefined && aiCount > 0 && (
-          <p className="hidden text-xs text-muted-foreground sm:block">
-            <span className="font-medium text-violet-700">{aiCount}</span>{" "}
-            opened by the AI agent from tenant messages
-          </p>
-        )}
+        <div className="flex items-center gap-3">
+          {aiCount !== undefined && aiCount > 0 && (
+            <p className="hidden text-xs text-muted-foreground sm:block">
+              <span className="font-medium text-violet-700">{aiCount}</span>{" "}
+              opened by the AI agent from tenant messages
+            </p>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportCsv}
+            disabled={!tickets || tickets.length === 0}
+            title="Download the tickets in this view as CSV"
+          >
+            <Download />
+            Export CSV
+          </Button>
+        </div>
       </header>
 
       <div className="shrink-0 border-b px-3 py-2.5 md:px-5">
